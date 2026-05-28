@@ -1,0 +1,37 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# IntelliJ / Eclipse / VS Code
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+.vscode/
+.project
+.classpath
+.settings/
+bin/
+
+# macOS / Windows
+.DS_Store
+Thumbs.db
+
+# Logs and runtime
+*.log
+*.pid
+
+# Local secrets / env
+.env
+.env.*
+!.env.example
+
+# HSQLDB on-disk files (only relevant if we ever switch from :mem:)
+*.lck
+*.script
+*.properties.bak
+*.data

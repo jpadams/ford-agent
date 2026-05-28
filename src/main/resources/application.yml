@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: ford-agent
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      chat:
+        options:
+          model: gpt-4o-mini
+    chat:
+      memory:
+        repository:
+          jdbc:
+            initialize-schema: always
+  datasource:
+    url: jdbc:hsqldb:mem:chatmem
+    driver-class-name: org.hsqldb.jdbc.JDBCDriver
+    username: sa
+    password: ""
+
+neo4j:
+  uri: ${NEO4J_URI:bolt://localhost:7687}
+  username: ${NEO4J_USERNAME:neo4j}
+  password: ${NEO4J_PASSWORD:password}
+
+server:
+  port: 8080

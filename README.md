@@ -68,14 +68,19 @@ ford-agent/
     config/
       ChatClientConfig.java             # ChatMemory + ChatClient beans, system prompt
       Neo4jConfig.java                  # Driver bean from neo4j.* properties
+      WebConfig.java                    # forwards /ui to static ui.html
     chat/
-      ChatController.java               # POST /chat
+      ChatController.java               # POST /chat, GET /chat, POST /chat/new
       ChatRequest.java                  # record { conversationId, message }
       ChatResponse.java                 # record { conversationId, reply }
+      HistoryMessage.java               # record { role, content }
+      HistoryResponse.java              # record { conversationId, messages }
     tools/
       Neo4jTools.java                   # @Tool methods exposed to the LLM
   src/main/resources/
     application.yml
+    static/
+      ui.html                           # single-page vanilla-JS chat UI
 ```
 
 ---
@@ -130,9 +135,29 @@ export NEO4J_PASSWORD=...
 ./gradlew bootRun
 ```
 
-The app listens on `http://localhost:8080`. There is no GET root — `/chat` is the only endpoint.
+The app listens on `http://localhost:8080`. There is no GET root.
 
-### Talking to it
+### Web UI
+
+Open **http://localhost:8080/ui** in a browser. It's a single static page (vanilla HTML/JS, no build step) that talks to the same `/chat` endpoints:
+
+- Shows the current `conversationId` in the header.
+- Loads existing history on page load (so reloading the browser brings back your conversation as long as the `JSESSIONID` cookie is still valid and the JVM hasn't restarted).
+- Textarea + **Submit** button. Press Enter to send, Shift+Enter for a newline.
+- **New convo** button clears the current conversation's messages from chat memory, mints a fresh `conversationId`, and resets the view.
+
+The page is served from `src/main/resources/static/ui.html`; the path `/ui` is mapped to it via a forward in `config/WebConfig.java`.
+
+### HTTP API
+
+Endpoints:
+
+| Method & path     | Purpose |
+|-------------------|---------|
+| `POST /chat`      | Send a message. Body: `{ message, conversationId? }`. Returns `{ conversationId, reply }`. |
+| `GET /chat`       | Return history for the session's conversation: `{ conversationId, messages: [{role, content}] }`. Only user/assistant turns. |
+| `POST /chat/new`  | Clear the current conversation from chat memory and start a fresh one. Returns `{ conversationId, messages: [] }`. |
+| `GET /ui`         | The web UI (forwarded to `ui.html`). |
 
 Single-turn (server mints a new conversation id, returns it):
 
@@ -269,7 +294,7 @@ Older versions of `Neo4jTools.java` called `.asList()` on a value that can be NU
 The tool returned an error; the model paraphrased it. Look in the bootRun terminal for `ERROR ... Neo4jTools` — the real exception is there. Common causes: wrong URI scheme for Aura (must be `neo4j+s://`), wrong creds, custom DB user lacking permission to call `db.schema.*`.
 
 **Whitelabel 404 on `http://localhost:8080/`**
-There's no GET root. Only `POST /chat` is mapped.
+There's no GET root. Use `/ui` for the web UI, or hit the `/chat` endpoints directly.
 
 **Conversation doesn't seem to remember anything**
 Each request that omits `conversationId` and isn't carrying a `JSESSIONID` cookie gets a fresh conversation. Use `curl -b cookies.txt -c cookies.txt`, or echo the `conversationId` from the previous response back in the body.

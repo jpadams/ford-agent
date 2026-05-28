@@ -147,6 +147,10 @@ The app listens on `http://localhost:8080`. There is no GET root.
 Open **http://localhost:8080/ui** in a browser. It's a single static page (vanilla HTML/JS, no build step) that talks to the same `/chat` endpoints:
 
 - **Graph canvas** at the top (NVL). Whenever the assistant's tool calls return nodes / relationships / paths, they're rendered here. If the turn has no graph data, the canvas stays blank.
+  - **Pan** by dragging the background.
+  - **Zoom** with the scroll wheel / trackpad pinch.
+  - **Drag** individual nodes to reposition them.
+  - **Double-click a node** to expand it: the UI calls `POST /graph/expand`, fetches that node's neighbours (up to 50), and merges them into the canvas (deduped by id).
 - **Chat history** below the canvas, with the current `conversationId` in the header.
 - Loads existing history on page load (so reloading the browser brings back your conversation as long as the `JSESSIONID` cookie is still valid and the JVM hasn't restarted). The canvas does *not* replay — it starts blank on reload until the next turn produces a graph.
 - Textarea + **Submit** button. Press Enter to send, Shift+Enter for a newline.
@@ -163,6 +167,7 @@ Endpoints:
 | `POST /chat`      | Send a message. Body: `{ message, conversationId? }`. Returns `{ conversationId, reply, viz: { nodes, relationships } }`. `viz` is always present; nodes/relationships are empty arrays when no graph elements were returned by the model's queries this turn. |
 | `GET /chat`       | Return history for the session's conversation: `{ conversationId, messages: [{role, content}] }`. Only user/assistant turns. History doesn't include viz payloads. |
 | `POST /chat/new`  | Clear the current conversation from chat memory and start a fresh one. Returns `{ conversationId, messages: [] }`. |
+| `POST /graph/expand` | Given `{ nodeId }` (a Neo4j `elementId`), runs `MATCH (n)-[r]-(m) WHERE elementId(n) = $id RETURN n, r, m LIMIT 50`. Returns `{ nodes, relationships }` in the same shape as the `viz` field. Used by the UI's node double-click. |
 | `GET /ui`         | The web UI (forwarded to `ui.html`). |
 
 The viz payload comes from `tools/VizCollector` (request-scoped). Whenever the model's `runReadQuery` calls return `Node`, `Relationship`, or `Path` values, those are auto-extracted into the payload — no special tool, no structured-output prompting. The model just writes Cypher with the entities in the `RETURN` clause when a visualization helps.

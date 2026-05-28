@@ -60,11 +60,17 @@
 
 <script type="module">
 let NVL = null;
+let InteractionHandlers = null;
 try {
   const mod = await import('https://esm.sh/@neo4j-nvl/base@1.2.0');
   NVL = mod.NVL;
 } catch (e) {
   console.error('NVL bundle failed to load — visualization disabled', e);
+}
+try {
+  InteractionHandlers = await import('https://esm.sh/@neo4j-nvl/interaction-handlers@1.2.0');
+} catch (e) {
+  console.error('NVL interaction handlers failed to load — pan/zoom/click disabled', e);
 }
 
 const messagesEl = document.getElementById('messages');
@@ -78,6 +84,62 @@ const canvasEl = document.getElementById('canvas');
 const canvasEmpty = document.getElementById('canvas-empty');
 
 let nvl = null;
+let interactions = [];
+
+function attachInteractions() {
+  if (!nvl || !InteractionHandlers) return;
+  try {
+    if (InteractionHandlers.PanInteraction) interactions.push(new InteractionHandlers.PanInteraction(nvl));
+    if (InteractionHandlers.ZoomInteraction) interactions.push(new InteractionHandlers.ZoomInteraction(nvl));
+    if (InteractionHandlers.DragNodeInteraction) interactions.push(new InteractionHandlers.DragNodeInteraction(nvl));
+    if (InteractionHandlers.ClickInteraction) {
+      const click = new InteractionHandlers.ClickInteraction(nvl);
+      click.updateCallback('onNodeDoubleClick', node => expandNode(node));
+      interactions.push(click);
+    }
+  } catch (e) {
+    console.error('Failed to attach NVL interactions', e);
+  }
+}
+
+function destroyInteractions() {
+  for (const i of interactions) {
+    try { i.destroy && i.destroy(); } catch (e) { /* ignore */ }
+  }
+  interactions = [];
+}
+
+function toNvlNode(n) {
+  return { id: n.id, captions: n.caption ? [{ value: n.caption, styles: ['bold'] }] : [] };
+}
+function toNvlRel(r) {
+  return { id: r.id, from: r.from, to: r.to, captions: r.type ? [{ value: r.type }] : [] };
+}
+
+async function expandNode(node) {
+  if (!nvl || !node || !node.id) return;
+  setBusy(true, 'Expanding…');
+  try {
+    const res = await fetch('/graph/expand', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ nodeId: node.id })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const newNodes = (data.nodes || []).map(toNvlNode);
+    const newRels = (data.relationships || []).map(toNvlRel);
+    if (typeof nvl.addAndUpdateElementsInGraph === 'function') {
+      nvl.addAndUpdateElementsInGraph(newNodes, newRels);
+    } else if (typeof nvl.addElementsToGraph === 'function') {
+      nvl.addElementsToGraph(newNodes, newRels);
+    }
+    setBusy(false, `Expanded: +${newNodes.length} nodes, +${newRels.length} rels`);
+  } catch (e) {
+    setBusy(false, 'Expand failed: ' + e.message);
+  }
+}
 
 function renderMessages(messages) {
   if (!messages.length) {
@@ -105,6 +167,7 @@ function setBusy(busy, msg = '') {
 }
 
 function clearViz() {
+  destroyInteractions();
   if (nvl) {
     try { nvl.destroy(); } catch (e) { /* ignore */ }
     nvl = null;
@@ -124,18 +187,11 @@ function renderViz(viz) {
     return;
   }
   canvasEmpty.classList.add('hidden');
-  const nvlNodes = viz.nodes.map(n => ({
-    id: n.id,
-    captions: n.caption ? [{ value: n.caption, styles: ['bold'] }] : [],
-  }));
-  const nvlRels = (viz.relationships || []).map(r => ({
-    id: r.id,
-    from: r.from,
-    to: r.to,
-    captions: r.type ? [{ value: r.type }] : [],
-  }));
+  const nvlNodes = viz.nodes.map(toNvlNode);
+  const nvlRels = (viz.relationships || []).map(toNvlRel);
   try {
     nvl = new NVL(canvasEl, nvlNodes, nvlRels, { initialZoom: 1 });
+    attachInteractions();
   } catch (e) {
     console.error('NVL render failed', e);
     clearViz();

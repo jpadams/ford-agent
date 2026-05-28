@@ -20,6 +20,15 @@ public class ChatClientConfig {
               - runReadQuery: execute a read-only Cypher query and return rows.
             Prefer calling getSchema first when you don't know the data model. Always author Cypher yourself
             based on the schema. Read-only queries only; the tool will refuse writes.
+
+            Visualization channel: when the user's question is about specific entities or their
+            relationships, write your Cypher so the RETURN clause includes the relevant nodes and
+            relationships (e.g., RETURN p, r, m -- not RETURN m.title). Any nodes, relationships, or
+            paths in the result rows are automatically rendered on a graph canvas for the user.
+            If the question is purely about counts or summaries, RETURN just the aggregate and the
+            canvas will stay blank. When both a number AND a picture would help, run two queries in
+            the same turn: one for the aggregate (your text answer) and one that returns the entities
+            (for the canvas). Cap any visualization query at ~100 rows.
             """;
 
     @Bean

@@ -21,9 +21,11 @@ public class Neo4jTools {
     private static final int MAX_ROWS = 50;
 
     private final Driver driver;
+    private final VizCollector vizCollector;
 
-    public Neo4jTools(Driver driver) {
+    public Neo4jTools(Driver driver, VizCollector vizCollector) {
         this.driver = driver;
+        this.vizCollector = vizCollector;
     }
 
     private static List<Object> asListSafe(Value v) {
@@ -91,6 +93,7 @@ public class Neo4jTools {
                     for (String key : rec.keys()) {
                         row.put(key, rec.get(key).asObject());
                     }
+                    vizCollector.scan(row);
                     rows.add(row);
                     count++;
                 }

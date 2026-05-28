@@ -1,6 +1,6 @@
 # ford-agent
 
-A small Spring Boot service that exposes a chat endpoint backed by an OpenAI model. The model can answer questions about data in a Neo4j graph by calling Cypher tools via function calling. Multi-turn conversations are preserved across requests using Spring AI's JDBC chat-memory repository against an in-memory HSQLDB database, with browser sessions auto-binding to a conversation id.
+A small Spring Boot service that exposes a chat endpoint backed by an OpenAI model. The model can answer questions about data in a Neo4j graph by calling Cypher tools via function calling. Every turn can also return a node/relationship payload that the UI renders on a Neo4j Visualization Library (NVL) canvas — graph and text answers side by side. Multi-turn conversations are preserved across requests using Spring AI's JDBC chat-memory repository against an in-memory HSQLDB database, with browser sessions auto-binding to a conversation id.
 
 ---
 
@@ -25,7 +25,7 @@ A small Spring Boot service that exposes a chat endpoint backed by an OpenAI mod
       │                         │
       ▼                         ▼
    OpenAI chat API         Tool dispatch (when model decides)
-   (gpt-4o-mini)              │
+   (gpt-5)              │
                               ▼
                           ┌──────────────────┐
                           │ Neo4jTools        │   getSchema()
@@ -77,10 +77,15 @@ ford-agent/
       HistoryResponse.java              # record { conversationId, messages }
     tools/
       Neo4jTools.java                   # @Tool methods exposed to the LLM
+      VizCollector.java                 # @RequestScope, collects Node/Rel/Path from query rows
+    chat/                               # (continued)
+      VizNode.java                      # record { id, labels, caption, properties }
+      VizRelationship.java              # record { id, from, to, type, caption }
+      VizPayload.java                   # record { nodes, relationships }
   src/main/resources/
     application.yml
     static/
-      ui.html                           # single-page vanilla-JS chat UI
+      ui.html                           # single-page vanilla-JS chat UI + NVL canvas (NVL loaded from esm.sh)
 ```
 
 ---
@@ -141,12 +146,13 @@ The app listens on `http://localhost:8080`. There is no GET root.
 
 Open **http://localhost:8080/ui** in a browser. It's a single static page (vanilla HTML/JS, no build step) that talks to the same `/chat` endpoints:
 
-- Shows the current `conversationId` in the header.
-- Loads existing history on page load (so reloading the browser brings back your conversation as long as the `JSESSIONID` cookie is still valid and the JVM hasn't restarted).
+- **Graph canvas** at the top (NVL). Whenever the assistant's tool calls return nodes / relationships / paths, they're rendered here. If the turn has no graph data, the canvas stays blank.
+- **Chat history** below the canvas, with the current `conversationId` in the header.
+- Loads existing history on page load (so reloading the browser brings back your conversation as long as the `JSESSIONID` cookie is still valid and the JVM hasn't restarted). The canvas does *not* replay — it starts blank on reload until the next turn produces a graph.
 - Textarea + **Submit** button. Press Enter to send, Shift+Enter for a newline.
-- **New convo** button clears the current conversation's messages from chat memory, mints a fresh `conversationId`, and resets the view.
+- **New convo** button clears the current conversation's messages from chat memory, clears the canvas, mints a fresh `conversationId`, and resets the view.
 
-The page is served from `src/main/resources/static/ui.html`; the path `/ui` is mapped to it via a forward in `config/WebConfig.java`.
+The page is served from `src/main/resources/static/ui.html`; the path `/ui` is mapped to it via a forward in `config/WebConfig.java`. NVL is loaded as an ES module from `esm.sh` at page load — see **NVL loading** below.
 
 ### HTTP API
 
@@ -154,10 +160,12 @@ Endpoints:
 
 | Method & path     | Purpose |
 |-------------------|---------|
-| `POST /chat`      | Send a message. Body: `{ message, conversationId? }`. Returns `{ conversationId, reply }`. |
-| `GET /chat`       | Return history for the session's conversation: `{ conversationId, messages: [{role, content}] }`. Only user/assistant turns. |
+| `POST /chat`      | Send a message. Body: `{ message, conversationId? }`. Returns `{ conversationId, reply, viz: { nodes, relationships } }`. `viz` is always present; nodes/relationships are empty arrays when no graph elements were returned by the model's queries this turn. |
+| `GET /chat`       | Return history for the session's conversation: `{ conversationId, messages: [{role, content}] }`. Only user/assistant turns. History doesn't include viz payloads. |
 | `POST /chat/new`  | Clear the current conversation from chat memory and start a fresh one. Returns `{ conversationId, messages: [] }`. |
 | `GET /ui`         | The web UI (forwarded to `ui.html`). |
+
+The viz payload comes from `tools/VizCollector` (request-scoped). Whenever the model's `runReadQuery` calls return `Node`, `Relationship`, or `Path` values, those are auto-extracted into the payload — no special tool, no structured-output prompting. The model just writes Cypher with the entities in the `RETURN` clause when a visualization helps.
 
 Single-turn (server mints a new conversation id, returns it):
 
@@ -191,6 +199,14 @@ curl -s -X POST localhost:8080/chat -H 'content-type: application/json' \
 
 ---
 
+## NVL loading
+
+`ui.html` dynamically imports NVL from `https://esm.sh/@neo4j-nvl/base@1.2.0` at page load. To pin a different version, edit the URL in `ui.html` (search for `esm.sh/@neo4j-nvl/base`).
+
+This is a CDN load, not a local vendor. We tried vendoring (jsDelivr's `+esm` bundle, then esm.sh's bundle) and both end up pulling transitive deps from the CDN's own domain at runtime — the jsDelivr variant breaks (`graphlib` can't find `lodash`), the esm.sh variant works but only when the bundle's relative `from"/..."` imports can resolve back to esm.sh. True offline-friendly local vendoring would require running a real bundler (esbuild/rollup) over `@neo4j-nvl/base`; we deliberately don't set that up here.
+
+If NVL fails to load (network, CDN outage, browser extension blocking it), chat and the conversation id still work — the canvas just stays blank with a "Visualization library not loaded" note, and the error is logged to the browser console.
+
 ## What you can tweak
 
 ### LLM model and options — `application.yml`
@@ -200,8 +216,8 @@ spring:
     openai:
       chat:
         options:
-          model: gpt-4o-mini       # any OpenAI chat model id
-          temperature: 0.2         # add other ChatOptions here as needed
+          model: gpt-5       # any OpenAI chat model id
+          temperature: 1     # this temp required by gpt-5
           max-tokens: 1024
 ```
 
@@ -243,6 +259,12 @@ private static final int MAX_ROWS = 50;
 ```
 Rows beyond this are truncated and the tool tells the model "(truncated at 50)". Raise for richer answers, lower to cap token usage.
 
+### Visualization node cap — `tools/VizCollector.java`
+```java
+private static final int MAX_NODES = 100;
+```
+Once the per-request collector hits 100 unique nodes, further `Node` values are silently dropped. Relationships are kept only when both endpoints are within the cap (so you never get a dangling edge on the canvas).
+
 ### Adding more tools
 Any Spring bean method annotated with `@Tool` and registered via `.defaultTools(...)` in `ChatClientConfig` becomes callable by the model. Pattern:
 ```java
@@ -259,11 +281,12 @@ Keep descriptions concrete — they're the model's only documentation.
 |-------------------------------|---------------------------------------------|---------------|
 | Messages sent to model        | `MessageWindowChatMemory.maxMessages`       | last 20       |
 | Per-message size              | DB column `LONGVARCHAR`                     | effectively unlimited |
-| LLM context window            | OpenAI model                                | ~128K tokens (gpt-4o-mini) |
+| LLM context window            | OpenAI model                                | ~128K tokens (gpt-5) |
 | Session idle timeout          | Tomcat `server.servlet.session.timeout`     | 30 minutes (default) |
 | History retention             | HSQLDB `jdbc:hsqldb:mem:`                   | lost on app restart |
 | Cleanup of old conversations  | none                                        | DB grows monotonically until restart |
 | Cypher rows returned per call | `Neo4jTools.MAX_ROWS`                       | 50            |
+| Nodes shown on canvas         | `VizCollector.MAX_NODES`                    | 100           |
 
 ---
 

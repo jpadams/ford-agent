@@ -1,5 +1,6 @@
 package com.example.fordagent.chat;
 
+import com.example.fordagent.tools.VizCollector;
 import jakarta.servlet.http.HttpSession;
 import java.util.List;
 import java.util.UUID;
@@ -21,10 +22,12 @@ public class ChatController {
 
     private final ChatClient chatClient;
     private final ChatMemory chatMemory;
+    private final VizCollector vizCollector;
 
-    public ChatController(ChatClient chatClient, ChatMemory chatMemory) {
+    public ChatController(ChatClient chatClient, ChatMemory chatMemory, VizCollector vizCollector) {
         this.chatClient = chatClient;
         this.chatMemory = chatMemory;
+        this.vizCollector = vizCollector;
     }
 
     @PostMapping
@@ -38,7 +41,7 @@ public class ChatController {
                 .call()
                 .content();
 
-        return new ChatResponse(conversationId, reply);
+        return new ChatResponse(conversationId, reply, vizCollector.snapshot());
     }
 
     @GetMapping

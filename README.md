@@ -1,4 +1,4 @@
-# ford-agent
+# Frontend-Oriented (graph) Retrieval Daemon aka ford-agent
 
 A small Spring Boot service that exposes a chat endpoint backed by an OpenAI model. The model can answer questions about data in a Neo4j graph by calling Cypher tools via function calling. Every turn can also return a node/relationship payload that the UI renders on a Neo4j Visualization Library (NVL) canvas — graph and text answers side by side. Multi-turn conversations are preserved across requests using Spring AI's JDBC chat-memory repository against an in-memory HSQLDB database, with browser sessions auto-binding to a conversation id.
 

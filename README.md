@@ -154,6 +154,7 @@ Open **http://localhost:8080/ui** in a browser. It's a single static page (vanil
 - **Chat history** below the canvas, with the current `conversationId` in the header.
 - Loads existing history on page load (so reloading the browser brings back your conversation as long as the `JSESSIONID` cookie is still valid and the JVM hasn't restarted). The canvas does *not* replay — it starts blank on reload until the next turn produces a graph.
 - Textarea + **Submit** button. Press Enter to send, Shift+Enter for a newline.
+- **👍 / 👎 buttons** appear under every assistant reply. Clicking one POSTs to `/chat/feedback` and gets logged server-side. Clicking the opposite rating switches the selection; it's purely a logging signal — no state is persisted between page loads.
 - **New convo** button clears the current conversation's messages from chat memory, clears the canvas, mints a fresh `conversationId`, and resets the view.
 
 The page is served from `src/main/resources/static/ui.html`; the path `/ui` is mapped to it via a forward in `config/WebConfig.java`. NVL is loaded as an ES module from `esm.sh` at page load — see **NVL loading** below.
@@ -167,6 +168,7 @@ Endpoints:
 | `POST /chat`      | Send a message. Body: `{ message, conversationId? }`. Returns `{ conversationId, reply, viz: { nodes, relationships } }`. `viz` is always present; nodes/relationships are empty arrays when no graph elements were returned by the model's queries this turn. |
 | `GET /chat`       | Return history for the session's conversation: `{ conversationId, messages: [{role, content}] }`. Only user/assistant turns. History doesn't include viz payloads. |
 | `POST /chat/new`  | Clear the current conversation from chat memory and start a fresh one. Returns `{ conversationId, messages: [] }`. |
+| `POST /chat/feedback` | Body: `{ conversationId, rating: "up"\|"down", messageIndex, messagePreview }`. No response body. Server logs the rating against the conversation; nothing is persisted. Used by the UI's 👍 / 👎 buttons. |
 | `POST /graph/expand` | Given `{ nodeId }` (a Neo4j `elementId`), runs `MATCH (n)-[r]-(m) WHERE elementId(n) = $id RETURN n, r, m LIMIT 50`. Returns `{ nodes, relationships }` in the same shape as the `viz` field. Used by the UI's node double-click. |
 | `GET /ui`         | The web UI (forwarded to `ui.html`). |
 
@@ -314,6 +316,7 @@ What gets logged where:
 | `com.example.fordagent.chat.ChatController` | request received  | `conversationId`, flattened user `message` |
 | `com.example.fordagent.chat.ChatController` | response sent     | `conversationId`, `replyChars`, `vizNodes`, `vizRels`, `elapsedMs` |
 | `com.example.fordagent.chat.ChatController` | `POST /chat/new`              | the cleared `previousConversationId` and the fresh `conversationId` |
+| `com.example.fordagent.chat.ChatController` | `POST /chat/feedback`         | `conversationId`, `rating` (up\|down), `messageIndex`, `preview` (first 200 chars of the assistant reply being rated) |
 | `com.example.fordagent.tools.Neo4jTools` | `getSchema` invocation | `status`, `chars`, `elapsedMs`, stack trace on failure |
 | `com.example.fordagent.tools.Neo4jTools` | `runReadQuery` invocation | `cypher` (whitespace collapsed), `params`, `status`, `rows`, `truncated`, `elapsedMs`, stack trace on failure |
 | `com.example.fordagent.graph.GraphController` | `POST /graph/expand` | `nodeId`, `status`, `nodes`, `rels`, `elapsedMs` |

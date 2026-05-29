@@ -66,6 +66,21 @@ public class ChatController {
         return new HistoryResponse(conversationId, view);
     }
 
+    @PostMapping("/feedback")
+    public void feedback(@RequestBody FeedbackRequest request, HttpSession session) {
+        String conversationId = (request != null
+                        && request.conversationId() != null
+                        && !request.conversationId().isBlank())
+                ? request.conversationId()
+                : (String) session.getAttribute(SESSION_ATTR);
+        String rating = request == null ? null : request.rating();
+        Integer idx = request == null ? null : request.messageIndex();
+        String preview = request == null ? "" : oneLine(request.messagePreview());
+        log.info(
+                "chat feedback conversationId={} rating={} messageIndex={} preview={}",
+                conversationId, rating, idx, preview);
+    }
+
     @PostMapping("/new")
     public HistoryResponse newConversation(HttpSession session) {
         Object existing = session.getAttribute(SESSION_ATTR);

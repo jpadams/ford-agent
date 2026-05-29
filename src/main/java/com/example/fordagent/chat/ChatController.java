@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class ChatController {
 
     private static final Logger log = LoggerFactory.getLogger(ChatController.class);
+    public static final String MDC_CONVERSATION_ID = "conversationId";
     private static final String SESSION_ATTR = "conversationId";
 
     private final ChatClient chatClient;
@@ -36,22 +38,27 @@ public class ChatController {
     @PostMapping
     public ChatResponse chat(@RequestBody ChatRequest request, HttpSession session) {
         String conversationId = resolveConversationId(request, session);
+        MDC.put(MDC_CONVERSATION_ID, conversationId);
         long start = System.nanoTime();
         log.info("chat user conversationId={} message={}", conversationId, oneLine(request.message()));
+        try {
+            String reply = chatClient
+                    .prompt()
+                    .user(request.message())
+                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
+                    .call()
+                    .content();
 
-        String reply = chatClient
-                .prompt()
-                .user(request.message())
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
-                .call()
-                .content();
-
-        VizPayload viz = vizCollector.snapshot();
-        log.info("chat assistant conversationId={} replyChars={} vizNodes={} vizRels={} elapsedMs={}",
-                conversationId, reply == null ? 0 : reply.length(),
-                viz.nodes().size(), viz.relationships().size(),
-                (System.nanoTime() - start) / 1_000_000);
-        return new ChatResponse(conversationId, reply, viz);
+            VizPayload viz = vizCollector.snapshot();
+            log.info(
+                    "chat assistant conversationId={} replyChars={} vizNodes={} vizRels={} elapsedMs={}",
+                    conversationId, reply == null ? 0 : reply.length(),
+                    viz.nodes().size(), viz.relationships().size(),
+                    (System.nanoTime() - start) / 1_000_000);
+            return new ChatResponse(conversationId, reply, viz);
+        } finally {
+            MDC.remove(MDC_CONVERSATION_ID);
+        }
     }
 
     @GetMapping
@@ -73,24 +80,39 @@ public class ChatController {
                         && !request.conversationId().isBlank())
                 ? request.conversationId()
                 : (String) session.getAttribute(SESSION_ATTR);
-        String rating = request == null ? null : request.rating();
-        Integer idx = request == null ? null : request.messageIndex();
-        String preview = request == null ? "" : oneLine(request.messagePreview());
-        log.info(
-                "chat feedback conversationId={} rating={} messageIndex={} preview={}",
-                conversationId, rating, idx, preview);
+        MDC.put(MDC_CONVERSATION_ID, conversationId == null ? "" : conversationId);
+        try {
+            String rating = request == null ? null : request.rating();
+            Integer idx = request == null ? null : request.messageIndex();
+            String preview = request == null ? "" : oneLine(request.messagePreview());
+            log.info(
+                    "chat feedback conversationId={} rating={} messageIndex={} preview={}",
+                    conversationId, rating, idx, preview);
+        } finally {
+            MDC.remove(MDC_CONVERSATION_ID);
+        }
     }
 
     @PostMapping("/new")
     public HistoryResponse newConversation(HttpSession session) {
         Object existing = session.getAttribute(SESSION_ATTR);
         if (existing instanceof String s && !s.isBlank()) {
-            chatMemory.clear(s);
-            log.info("chat newConversation cleared previousConversationId={}", s);
+            MDC.put(MDC_CONVERSATION_ID, s);
+            try {
+                chatMemory.clear(s);
+                log.info("chat newConversation cleared previousConversationId={}", s);
+            } finally {
+                MDC.remove(MDC_CONVERSATION_ID);
+            }
         }
         String fresh = UUID.randomUUID().toString();
         session.setAttribute(SESSION_ATTR, fresh);
-        log.info("chat newConversation conversationId={}", fresh);
+        MDC.put(MDC_CONVERSATION_ID, fresh);
+        try {
+            log.info("chat newConversation conversationId={}", fresh);
+        } finally {
+            MDC.remove(MDC_CONVERSATION_ID);
+        }
         return new HistoryResponse(fresh, List.of());
     }
 

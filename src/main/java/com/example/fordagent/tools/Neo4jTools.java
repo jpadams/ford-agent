@@ -10,6 +10,7 @@ import org.neo4j.driver.SessionConfig;
 import org.neo4j.driver.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
@@ -39,7 +40,8 @@ public class Neo4jTools {
             """)
     public String getSchema() {
         long start = System.nanoTime();
-        log.info("tool=getSchema");
+        String cid = cid();
+        log.info("tool=getSchema conversationId={}", cid);
         try (var session = driver.session(SessionConfig.builder().build())) {
             String result = session.executeRead(tx -> {
                 StringBuilder sb = new StringBuilder();
@@ -68,12 +70,12 @@ public class Neo4jTools {
 
                 return sb.toString();
             });
-            log.info("tool=getSchema status=ok chars={} elapsedMs={}",
-                    result.length(), (System.nanoTime() - start) / 1_000_000);
+            log.info("tool=getSchema conversationId={} status=ok chars={} elapsedMs={}",
+                    cid, result.length(), (System.nanoTime() - start) / 1_000_000);
             return result;
         } catch (Exception e) {
-            log.error("tool=getSchema status=error elapsedMs={}",
-                    (System.nanoTime() - start) / 1_000_000, e);
+            log.error("tool=getSchema conversationId={} status=error elapsedMs={}",
+                    cid, (System.nanoTime() - start) / 1_000_000, e);
             return "Failed to read schema: " + e.getClass().getSimpleName() + ": " + e.getMessage();
         }
     }
@@ -89,7 +91,8 @@ public class Neo4jTools {
                     Map<String, Object> parameters) {
         Map<String, Object> params = parameters == null ? Map.of() : parameters;
         long start = System.nanoTime();
-        log.info("tool=runReadQuery cypher={} params={}", oneLine(cypher), params);
+        String cid = cid();
+        log.info("tool=runReadQuery conversationId={} cypher={} params={}", cid, oneLine(cypher), params);
         try (var session = driver.session(SessionConfig.builder().build())) {
             return session.executeRead(tx -> {
                 List<Map<String, Object>> rows = new ArrayList<>();
@@ -115,18 +118,25 @@ public class Neo4jTools {
                 for (Map<String, Object> row : rows) {
                     sb.append(row).append('\n');
                 }
-                log.info("tool=runReadQuery status=ok rows={} truncated={} elapsedMs={}",
-                        rows.size(), truncated, (System.nanoTime() - start) / 1_000_000);
+                log.info(
+                        "tool=runReadQuery conversationId={} status=ok rows={} truncated={} elapsedMs={}",
+                        cid, rows.size(), truncated, (System.nanoTime() - start) / 1_000_000);
                 return sb.toString();
             });
         } catch (Exception e) {
-            log.error("tool=runReadQuery status=error cypher={} elapsedMs={}",
-                    oneLine(cypher), (System.nanoTime() - start) / 1_000_000, e);
+            log.error(
+                    "tool=runReadQuery conversationId={} status=error cypher={} elapsedMs={}",
+                    cid, oneLine(cypher), (System.nanoTime() - start) / 1_000_000, e);
             return "Query failed: " + e.getClass().getSimpleName() + ": " + e.getMessage();
         }
     }
 
     private static String oneLine(String s) {
         return s == null ? "" : s.replaceAll("\\s+", " ").trim();
+    }
+
+    private static String cid() {
+        String v = MDC.get("conversationId");
+        return v == null ? "" : v;
     }
 }

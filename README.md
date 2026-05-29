@@ -299,24 +299,28 @@ Keep descriptions concrete — they're the model's only documentation.
 
 ## Logging
 
-Each `/chat`, `/chat/new`, `/graph/expand`, and every LLM-invoked tool emits a single-line, key=value log via SLF4J. No new deps — uses Spring Boot's bundled Logback. Designed so one turn produces a readable, greppable sequence:
+Each `/chat`, `/chat/new`, `/chat/feedback`, `/graph/expand`, and every LLM-invoked tool emits a single-line, key=value log via SLF4J. No new deps — uses Spring Boot's bundled Logback. Every conversation-related log line includes `conversationId=<uuid>` so you can `grep` a whole conversation from anywhere in the log.
+
+`ConversationId` is propagated through tool calls via SLF4J's `MDC` (`ChatController.MDC_CONVERSATION_ID`): the controller sets it at request entry in a try/finally; tool methods read it back via `MDC.get(...)`. Since Spring AI's tool dispatch runs on the same servlet thread as the request, MDC's thread-local works out of the box. If you ever add async/streaming, propagate MDC manually.
+
+One turn now produces this greppable sequence:
 
 ```
 chat user      conversationId=<uuid> message=<flattened, capped at 500 chars>
-  tool=getSchema status=ok chars=812 elapsedMs=58
-  tool=runReadQuery cypher=<one-line Cypher> params={...}
-  tool=runReadQuery status=ok rows=12 truncated=false elapsedMs=43
+tool=getSchema     conversationId=<uuid> status=ok chars=812 elapsedMs=58
+tool=runReadQuery  conversationId=<uuid> cypher=<one-line Cypher> params={...}
+tool=runReadQuery  conversationId=<uuid> status=ok rows=12 truncated=false elapsedMs=43
 chat assistant conversationId=<uuid> replyChars=246 vizNodes=12 vizRels=12 elapsedMs=1820
 ```
 
-What gets logged where:
+What gets logged where (every line below also includes `conversationId`):
 
 | Logger                                | Event                          | Fields |
 |---------------------------------------|--------------------------------|--------|
-| `com.example.fordagent.chat.ChatController` | request received  | `conversationId`, flattened user `message` |
-| `com.example.fordagent.chat.ChatController` | response sent     | `conversationId`, `replyChars`, `vizNodes`, `vizRels`, `elapsedMs` |
+| `com.example.fordagent.chat.ChatController` | request received  | flattened user `message` |
+| `com.example.fordagent.chat.ChatController` | response sent     | `replyChars`, `vizNodes`, `vizRels`, `elapsedMs` |
 | `com.example.fordagent.chat.ChatController` | `POST /chat/new`              | the cleared `previousConversationId` and the fresh `conversationId` |
-| `com.example.fordagent.chat.ChatController` | `POST /chat/feedback`         | `conversationId`, `rating` (up\|down), `messageIndex`, `preview` (first 200 chars of the assistant reply being rated) |
+| `com.example.fordagent.chat.ChatController` | `POST /chat/feedback`         | `rating` (up\|down), `messageIndex`, `preview` (first 200 chars of the assistant reply being rated) |
 | `com.example.fordagent.tools.Neo4jTools` | `getSchema` invocation | `status`, `chars`, `elapsedMs`, stack trace on failure |
 | `com.example.fordagent.tools.Neo4jTools` | `runReadQuery` invocation | `cypher` (whitespace collapsed), `params`, `status`, `rows`, `truncated`, `elapsedMs`, stack trace on failure |
 | `com.example.fordagent.graph.GraphController` | `POST /graph/expand` | `nodeId`, `status`, `nodes`, `rels`, `elapsedMs` |

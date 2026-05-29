@@ -295,6 +295,56 @@ Keep descriptions concrete — they're the model's only documentation.
 
 ---
 
+## Logging
+
+Each `/chat`, `/chat/new`, `/graph/expand`, and every LLM-invoked tool emits a single-line, key=value log via SLF4J. No new deps — uses Spring Boot's bundled Logback. Designed so one turn produces a readable, greppable sequence:
+
+```
+chat user      conversationId=<uuid> message=<flattened, capped at 500 chars>
+  tool=getSchema status=ok chars=812 elapsedMs=58
+  tool=runReadQuery cypher=<one-line Cypher> params={...}
+  tool=runReadQuery status=ok rows=12 truncated=false elapsedMs=43
+chat assistant conversationId=<uuid> replyChars=246 vizNodes=12 vizRels=12 elapsedMs=1820
+```
+
+What gets logged where:
+
+| Logger                                | Event                          | Fields |
+|---------------------------------------|--------------------------------|--------|
+| `com.example.fordagent.chat.ChatController` | request received  | `conversationId`, flattened user `message` |
+| `com.example.fordagent.chat.ChatController` | response sent     | `conversationId`, `replyChars`, `vizNodes`, `vizRels`, `elapsedMs` |
+| `com.example.fordagent.chat.ChatController` | `POST /chat/new`              | the cleared `previousConversationId` and the fresh `conversationId` |
+| `com.example.fordagent.tools.Neo4jTools` | `getSchema` invocation | `status`, `chars`, `elapsedMs`, stack trace on failure |
+| `com.example.fordagent.tools.Neo4jTools` | `runReadQuery` invocation | `cypher` (whitespace collapsed), `params`, `status`, `rows`, `truncated`, `elapsedMs`, stack trace on failure |
+| `com.example.fordagent.graph.GraphController` | `POST /graph/expand` | `nodeId`, `status`, `nodes`, `rels`, `elapsedMs` |
+
+Privacy / size notes:
+- User messages are flattened (whitespace collapsed) and truncated at 500 chars in the log.
+- Cypher is flattened to a single line; parameters are logged in full as their `Map.toString()`.
+- Assistant replies are *not* logged verbatim — only `replyChars`. Add `log.debug("reply text={}", reply)` in `ChatController` if you want the body too.
+
+Useful filters:
+```bash
+# everything for one conversation
+./gradlew bootRun | grep 'conversationId=ab12'
+# just tool invocations
+./gradlew bootRun | grep 'tool='
+# slowest turns
+./gradlew bootRun | grep 'chat assistant' | sort -t= -k7 -n
+```
+
+Bumping log levels (in `application.yml`):
+```yaml
+logging:
+  level:
+    com.example.fordagent: DEBUG       # tool-call detail
+    org.springframework.ai: DEBUG      # full prompt + raw OpenAI request/response
+```
+
+For structured JSON output (Loki/Splunk/CloudWatch), drop a `src/main/resources/logback-spring.xml` using `net.logstash.logback:logstash-logback-encoder` — the same key=value pairs already in our log statements get parsed into JSON fields with no code changes.
+
+---
+
 ## Verifying things work
 
 1. Start the app, then hit `/chat` with a question that requires the schema:

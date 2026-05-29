@@ -38,8 +38,10 @@ public class Neo4jTools {
             you do not already know the data model.
             """)
     public String getSchema() {
+        long start = System.nanoTime();
+        log.info("tool=getSchema");
         try (var session = driver.session(SessionConfig.builder().build())) {
-            return session.executeRead(tx -> {
+            String result = session.executeRead(tx -> {
                 StringBuilder sb = new StringBuilder();
 
                 sb.append("Node labels and properties:\n");
@@ -66,8 +68,12 @@ public class Neo4jTools {
 
                 return sb.toString();
             });
+            log.info("tool=getSchema status=ok chars={} elapsedMs={}",
+                    result.length(), (System.nanoTime() - start) / 1_000_000);
+            return result;
         } catch (Exception e) {
-            log.error("getSchema failed", e);
+            log.error("tool=getSchema status=error elapsedMs={}",
+                    (System.nanoTime() - start) / 1_000_000, e);
             return "Failed to read schema: " + e.getClass().getSimpleName() + ": " + e.getMessage();
         }
     }
@@ -82,6 +88,8 @@ public class Neo4jTools {
             @ToolParam(required = false, description = "Optional named parameters for the query.")
                     Map<String, Object> parameters) {
         Map<String, Object> params = parameters == null ? Map.of() : parameters;
+        long start = System.nanoTime();
+        log.info("tool=runReadQuery cypher={} params={}", oneLine(cypher), params);
         try (var session = driver.session(SessionConfig.builder().build())) {
             return session.executeRead(tx -> {
                 List<Map<String, Object>> rows = new ArrayList<>();
@@ -107,11 +115,18 @@ public class Neo4jTools {
                 for (Map<String, Object> row : rows) {
                     sb.append(row).append('\n');
                 }
+                log.info("tool=runReadQuery status=ok rows={} truncated={} elapsedMs={}",
+                        rows.size(), truncated, (System.nanoTime() - start) / 1_000_000);
                 return sb.toString();
             });
         } catch (Exception e) {
-            log.error("runReadQuery failed: cypher={}", cypher, e);
+            log.error("tool=runReadQuery status=error cypher={} elapsedMs={}",
+                    oneLine(cypher), (System.nanoTime() - start) / 1_000_000, e);
             return "Query failed: " + e.getClass().getSimpleName() + ": " + e.getMessage();
         }
+    }
+
+    private static String oneLine(String s) {
+        return s == null ? "" : s.replaceAll("\\s+", " ").trim();
     }
 }

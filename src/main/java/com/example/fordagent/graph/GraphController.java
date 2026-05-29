@@ -32,6 +32,8 @@ public class GraphController {
         if (request == null || request.nodeId() == null || request.nodeId().isBlank()) {
             return VizPayload.empty();
         }
+        long start = System.nanoTime();
+        log.info("graph expand nodeId={}", request.nodeId());
         try (var session = driver.session()) {
             session.executeRead(tx -> {
                 var result = tx.run(
@@ -47,9 +49,14 @@ public class GraphController {
                 }
                 return null;
             });
-            return vizCollector.snapshot();
+            VizPayload snap = vizCollector.snapshot();
+            log.info("graph expand nodeId={} status=ok nodes={} rels={} elapsedMs={}",
+                    request.nodeId(), snap.nodes().size(), snap.relationships().size(),
+                    (System.nanoTime() - start) / 1_000_000);
+            return snap;
         } catch (Exception e) {
-            log.error("expand failed for nodeId={}", request.nodeId(), e);
+            log.error("graph expand nodeId={} status=error elapsedMs={}",
+                    request.nodeId(), (System.nanoTime() - start) / 1_000_000, e);
             return VizPayload.empty();
         }
     }

@@ -4,6 +4,8 @@ import com.example.fordagent.tools.VizCollector;
 import jakarta.servlet.http.HttpSession;
 import java.util.List;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
@@ -18,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/chat")
 public class ChatController {
 
+    private static final Logger log = LoggerFactory.getLogger(ChatController.class);
     private static final String SESSION_ATTR = "conversationId";
 
     private final ChatClient chatClient;
@@ -33,6 +36,8 @@ public class ChatController {
     @PostMapping
     public ChatResponse chat(@RequestBody ChatRequest request, HttpSession session) {
         String conversationId = resolveConversationId(request, session);
+        long start = System.nanoTime();
+        log.info("chat user conversationId={} message={}", conversationId, oneLine(request.message()));
 
         String reply = chatClient
                 .prompt()
@@ -41,7 +46,12 @@ public class ChatController {
                 .call()
                 .content();
 
-        return new ChatResponse(conversationId, reply, vizCollector.snapshot());
+        VizPayload viz = vizCollector.snapshot();
+        log.info("chat assistant conversationId={} replyChars={} vizNodes={} vizRels={} elapsedMs={}",
+                conversationId, reply == null ? 0 : reply.length(),
+                viz.nodes().size(), viz.relationships().size(),
+                (System.nanoTime() - start) / 1_000_000);
+        return new ChatResponse(conversationId, reply, viz);
     }
 
     @GetMapping
@@ -61,10 +71,18 @@ public class ChatController {
         Object existing = session.getAttribute(SESSION_ATTR);
         if (existing instanceof String s && !s.isBlank()) {
             chatMemory.clear(s);
+            log.info("chat newConversation cleared previousConversationId={}", s);
         }
         String fresh = UUID.randomUUID().toString();
         session.setAttribute(SESSION_ATTR, fresh);
+        log.info("chat newConversation conversationId={}", fresh);
         return new HistoryResponse(fresh, List.of());
+    }
+
+    private static String oneLine(String s) {
+        if (s == null) return "";
+        String flat = s.replaceAll("\\s+", " ").trim();
+        return flat.length() > 500 ? flat.substring(0, 500) + "…" : flat;
     }
 
     private static String resolveConversationId(ChatRequest request, HttpSession session) {

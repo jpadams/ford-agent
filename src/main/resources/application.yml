@@ -8,6 +8,7 @@ spring:
         options:
           model: gpt-5
           temperature: 1.0
+          reasoning-effort: low
     chat:
       memory:
         repository:
